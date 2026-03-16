@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --color-yuki: #6d28d9;
+  --color-yuki-light: #8b5cf6;
+  --color-yuki-muted: #a78bfa;
+}
+
+:root {
+  --yuki-accent: #6d28d9;
+  --yuki-accent-light: #8b5cf6;
+  --yuki-muted: #64748b;
+  --card-bg: #fafafa;
+  --sidebar-bg: #f1f5f9;
+}
+
+body {
+  @apply antialiased font-sans text-neutral-800 bg-neutral-100;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}

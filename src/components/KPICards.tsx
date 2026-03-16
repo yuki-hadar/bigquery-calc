@@ -9,15 +9,22 @@ function fmtUSD(n: number): string {
   }).format(n);
 }
 
-function fmtNum(n: number): string {
+function fmtYC(n: number): string {
   return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(n);
 }
 
+type Card = {
+  label: string;
+  value: string;
+  valueLine2?: string;
+  sub: string;
+};
+
 export function KPICards({ metrics, ycUsd }: { metrics: DashboardMetrics; ycUsd: number }) {
-  const cards = [
+  const cards: Card[] = [
     {
       label: 'Total Original Cost',
       value: fmtUSD(metrics.totalOriginalCost),
@@ -35,7 +42,8 @@ export function KPICards({ metrics, ycUsd }: { metrics: DashboardMetrics; ycUsd:
     },
     {
       label: 'Yuki Fee',
-      value: `${fmtUSD(metrics.yukiFeeUSD)} (${fmtNum(metrics.chargeableYC)} YC)`,
+      value: fmtUSD(metrics.yukiFeeUSD),
+      valueLine2: `${fmtYC(metrics.chargeableYC)} Yuki Credits × $${ycUsd.toFixed(2)}`,
       sub: `Chargeable units × $${ycUsd.toFixed(2)}`,
     },
     {
@@ -58,6 +66,9 @@ export function KPICards({ metrics, ycUsd }: { metrics: DashboardMetrics; ycUsd:
           <p className="mt-1 text-lg font-semibold text-neutral-900 font-mono">
             {c.value}
           </p>
+          {c.valueLine2 && (
+            <p className="mt-0.5 text-sm text-neutral-600 font-mono">{c.valueLine2}</p>
+          )}
           <p className="mt-0.5 text-xs text-neutral-500">{c.sub}</p>
         </div>
       ))}

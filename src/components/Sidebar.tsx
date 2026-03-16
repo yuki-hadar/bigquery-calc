@@ -1,5 +1,10 @@
+import { useState, useRef, useEffect } from 'react';
 import type { UsageState } from '../lib/pricing';
 import type { PricingConfig } from '../lib/pricing';
+import { impliedPct, clampToRange } from '../lib/calc';
+
+const SLIDER_DEBOUNCE_MS = 500;
+const REMAINED_DEBOUNCE_MS = 1000;
 
 export type Edition = 'standard' | 'enterprise';
 export type Scenario = 'A' | 'B' | 'C';
@@ -11,32 +16,19 @@ interface SidebarProps {
   config: PricingConfig;
   queriesMovedPct: number;
   edition: Edition;
-  scenario: Scenario;
+  scenario: Scenario | null;
   onOriginalChange: (s: UsageState) => void;
   onOptimizedChange: (s: UsageState) => void;
   onConfigChange: (c: PricingConfig) => void;
   onQueriesMovedPctChange: (pct: number) => void;
   onEditionChange: (e: Edition) => void;
-  onScenarioChange: (s: Scenario) => void;
+  onScenarioChange: (s: Scenario | null) => void;
 }
 
 function parseInput(s: string): number {
   const v = s.replace(/[,\s]/g, '').replace(/[mM]$/, '000000').replace(/[kK]$/, '000');
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
-}
-
-function impliedPct(
-  original: UsageState,
-  optimized: UsageState,
-  field: 'onDemandTiB' | 'standardSlotHours' | 'enterpriseSlotHours',
-  newValue: number
-): number {
-  const orig = original[field];
-  const opt = optimized[field];
-  if (opt === orig) return 100;
-  const t = (newValue - orig) / (opt - orig);
-  return Math.round(Math.min(100, Math.max(0, t * 100)));
 }
 
 export function Sidebar({
@@ -59,6 +51,54 @@ export function Sidebar({
   const updateConfig = (key: keyof PricingConfig, value: number) =>
     onConfigChange({ ...config, [key]: value });
 
+  const [sliderValue, setSliderValue] = useState(queriesMovedPct);
+  const sliderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    setSliderValue(queriesMovedPct);
+  }, [queriesMovedPct]);
+  useEffect(() => () => {
+    if (sliderTimeoutRef.current) clearTimeout(sliderTimeoutRef.current);
+    if (remainedTimeoutRef.current) clearTimeout(remainedTimeoutRef.current);
+  }, []);
+
+  const handleSliderChange = (next: number) => {
+    setSliderValue(next);
+    if (sliderTimeoutRef.current) clearTimeout(sliderTimeoutRef.current);
+    sliderTimeoutRef.current = setTimeout(() => {
+      try {
+        onQueriesMovedPctChange(next);
+      } catch (_) {
+        // slider is nice-to-have; don't break manual fields
+      }
+      sliderTimeoutRef.current = null;
+    }, SLIDER_DEBOUNCE_MS);
+  };
+
+  type RemainedField = 'od' | 'slots' | 'otherSlots';
+  const [remainedPending, setRemainedPending] = useState<{ field: RemainedField; value: number } | null>(null);
+  const remainedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRemainedCommit = (
+    field: 'onDemandTiB' | 'standardSlotHours' | 'enterpriseSlotHours',
+    rawValue: number,
+    uiField: RemainedField
+  ) => {
+    setRemainedPending({ field: uiField, value: rawValue });
+    if (remainedTimeoutRef.current) clearTimeout(remainedTimeoutRef.current);
+    remainedTimeoutRef.current = setTimeout(() => {
+      const orig = original[field];
+      const opt = optimized[field];
+      const { pct } = clampToRange(rawValue, orig, opt);
+      if (pct >= 0) {
+        onQueriesMovedPctChange(pct);
+      } else {
+        onQueriesMovedPctChange(impliedPct(original, optimized, field, rawValue));
+      }
+      setRemainedPending(null);
+      remainedTimeoutRef.current = null;
+    }, REMAINED_DEBOUNCE_MS);
+  };
+
   const scenarioConfigs: Record<Scenario, { original: UsageState; optimized: UsageState }> = {
     A: {
       original: { onDemandTiB: 16000, enterpriseSlotHours: 0, standardSlotHours: 0 },
@@ -74,23 +114,10 @@ export function Sidebar({
     },
   };
 
-  const handleNewOdChange = (value: number) => {
-    const pct = impliedPct(original, optimized, 'onDemandTiB', value);
-    onQueriesMovedPctChange(pct);
-  };
-  const handleNewStdSlotsChange = (value: number) => {
-    const pct = impliedPct(original, optimized, 'standardSlotHours', value);
-    onQueriesMovedPctChange(pct);
-  };
-  const handleNewEntSlotsChange = (value: number) => {
-    const pct = impliedPct(original, optimized, 'enterpriseSlotHours', value);
-    onQueriesMovedPctChange(pct);
-  };
-
-  const showOriginalOd = scenario === 'A' || scenario === 'C';
-  const showOriginalSlots = scenario === 'B' || scenario === 'C';
-  const showNewOd = scenario === 'A' || scenario === 'B' || scenario === 'C';
-  const showNewSlots = scenario === 'A' || scenario === 'B' || scenario === 'C';
+  const showOriginalOd = scenario === null || scenario === 'A' || scenario === 'C';
+  const showOriginalSlots = scenario === null || scenario === 'B' || scenario === 'C';
+  const showNewOd = scenario === null || scenario === 'A' || scenario === 'B' || scenario === 'C';
+  const showNewSlots = scenario === null || scenario === 'A' || scenario === 'B' || scenario === 'C';
   const slotsLabel = edition === 'enterprise' ? 'Enterprise Slot-Hours' : 'Standard Slot-Hours';
 
   return (
@@ -100,29 +127,30 @@ export function Sidebar({
           Scenario
         </h2>
         <div className="flex gap-2">
-          {(['A', 'B', 'C'] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => {
-                onScenarioChange(s);
-                const cfg = scenarioConfigs[s];
-                onOriginalChange(cfg.original);
-                onOptimizedChange(cfg.optimized);
-              }}
-              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                scenario === s
-                  ? 'bg-violet-200 text-violet-900 border border-violet-300'
-                  : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300 border border-transparent'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
+          {(['A', 'B', 'C'] as const).map((s) => {
+            const label = s === 'A' ? 'On-demand→Slots' : s === 'B' ? 'Slots→On-demand' : 'Hybrid';
+            const selected = scenario === s;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  onScenarioChange(s);
+                  const cfg = scenarioConfigs[s];
+                  onOriginalChange(cfg.original);
+                  onOptimizedChange(cfg.optimized);
+                }}
+                className={`flex-1 px-2 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  selected
+                    ? 'bg-violet-200 text-violet-900 border border-violet-300'
+                    : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300 border border-transparent'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
-        <p className="text-xs text-neutral-500 mt-1">
-          A: OD→Slots · B: Slots→OD · C: Hybrid
-        </p>
       </div>
 
       <div>
@@ -131,18 +159,18 @@ export function Sidebar({
         </h2>
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className="text-xs text-neutral-600">YC (1 YC = $)</span>
+            <span className="text-xs text-neutral-600">Yuki Credit price ($)</span>
             <input
               type="number"
               min={0}
-              step={0.5}
-              value={config.ycUsd}
+              step={0.01}
+              value={config.ycUsd.toFixed(2)}
               onChange={(e) => updateConfig('ycUsd', parseFloat(e.target.value) || 0)}
               className="mt-0.5 w-full rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-neutral-900 font-mono text-sm"
             />
           </label>
           <label className="block">
-            <span className="text-xs text-neutral-600">On-Demand $/TiB</span>
+            <span className="text-xs text-neutral-600">On-demand $/TiB</span>
             <input
               type="number"
               min={0}
@@ -214,7 +242,7 @@ export function Sidebar({
         <div className="space-y-4">
           {showOriginalOd && (
             <label className="block">
-              <span className="text-xs text-neutral-600">Original On-Demand TiB</span>
+              <span className="text-xs text-neutral-600">Original on-demand TiB</span>
               <input
                 type="number"
                 min={0}
@@ -242,7 +270,7 @@ export function Sidebar({
               />
             </label>
           )}
-          {scenario === 'C' && (
+          {(scenario === null || scenario === 'C') && (
             <>
               {edition === 'enterprise' && (
                 <label className="block">
@@ -284,11 +312,14 @@ export function Sidebar({
             type="range"
             min={0}
             max={100}
-            value={queriesMovedPct}
-            onChange={(e) => onQueriesMovedPctChange(Number(e.target.value))}
+            step={0.1}
+            value={sliderValue}
+            onChange={(e) => handleSliderChange(Number(e.target.value))}
             className="flex-1 h-2 rounded-lg appearance-none bg-neutral-200 accent-violet-600"
           />
-          <span className="text-sm font-mono text-neutral-800 w-10">{queriesMovedPct}%</span>
+          <span className="text-sm font-mono text-neutral-800 w-12">
+            {sliderValue % 1 === 0 ? Math.round(sliderValue) : sliderValue.toFixed(1)}%
+          </span>
         </div>
       </div>
 
@@ -297,46 +328,54 @@ export function Sidebar({
           Existing + Yuki (optimized state)
         </h2>
         <div className="space-y-4">
-          {showNewOd && (
+          {/* Remained (1 - queries moved) — first */}
+          {showNewOd && (scenario === null || scenario !== 'B') && (
             <label className="block">
-              <span className="text-xs text-neutral-600">
-                {scenario === 'B' ? "Yuki's On-Demand TiB" : 'Existing On-Demand TiB'}
-              </span>
+              <span className="text-xs text-neutral-600">Remained on-demand TiB</span>
               <input
+                data-testid="remained-on-demand-tib"
                 type="number"
                 min={0}
-                step={100}
-                value={Math.round(displayedOptimized.onDemandTiB) || ''}
-                onChange={(e) => handleNewOdChange(parseInput(e.target.value) || 0)}
-                className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
-              />
-            </label>
-          )}
-          {showNewSlots && (
-            <label className="block">
-              <span className="text-xs text-neutral-600">
-                {scenario === 'A' ? "Yuki's Slot-Hours" : scenario === 'B' ? 'Existing Slot-Hours' : 'Slot-Hours'}
-              </span>
-              <input
-                type="number"
-                min={0}
-                step={10000}
+                step={0.01}
                 value={
-                  Math.round(
-                    edition === 'enterprise'
-                      ? displayedOptimized.enterpriseSlotHours
-                      : displayedOptimized.standardSlotHours
-                  ) || ''
+                  remainedPending?.field === 'od'
+                    ? remainedPending.value
+                    : displayedOptimized.onDemandTiB || ''
                 }
                 onChange={(e) => {
                   const v = parseInput(e.target.value) || 0;
-                  edition === 'enterprise' ? handleNewEntSlotsChange(v) : handleNewStdSlotsChange(v);
+                  scheduleRemainedCommit('onDemandTiB', v, 'od');
                 }}
                 className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
               />
             </label>
           )}
-          {scenario === 'C' && (
+          {showNewSlots && (scenario === null || scenario === 'B' || scenario === 'C') && (
+            <label className="block">
+              <span className="text-xs text-neutral-600">
+                {scenario === 'B' ? 'Remained Slot-Hours' : slotsLabel}
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={
+                  remainedPending?.field === 'slots'
+                    ? remainedPending.value
+                    : edition === 'enterprise'
+                      ? displayedOptimized.enterpriseSlotHours || ''
+                      : displayedOptimized.standardSlotHours || ''
+                }
+                onChange={(e) => {
+                  const v = parseInput(e.target.value) || 0;
+                  const field = edition === 'enterprise' ? 'enterpriseSlotHours' : 'standardSlotHours';
+                  scheduleRemainedCommit(field, v, 'slots');
+                }}
+                className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
+              />
+            </label>
+          )}
+          {(scenario === null || scenario === 'C') && (
             <label className="block">
               <span className="text-xs text-neutral-600">
                 {edition === 'enterprise' ? 'Standard Slot-Hours' : 'Enterprise Slot-Hours'}
@@ -344,21 +383,97 @@ export function Sidebar({
               <input
                 type="number"
                 min={0}
-                step={10000}
+                step={0.01}
                 value={
-                  Math.round(
-                    edition === 'enterprise'
-                      ? displayedOptimized.standardSlotHours
-                      : displayedOptimized.enterpriseSlotHours
-                  ) || ''
+                  remainedPending?.field === 'otherSlots'
+                    ? remainedPending.value
+                    : edition === 'enterprise'
+                      ? displayedOptimized.standardSlotHours || ''
+                      : displayedOptimized.enterpriseSlotHours || ''
                 }
                 onChange={(e) => {
                   const v = parseInput(e.target.value) || 0;
-                  edition === 'enterprise' ? handleNewStdSlotsChange(v) : handleNewEntSlotsChange(v);
+                  const field = edition === 'enterprise' ? 'standardSlotHours' : 'enterpriseSlotHours';
+                  scheduleRemainedCommit(field, v, 'otherSlots');
                 }}
                 className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
               />
             </label>
+          )}
+
+          <div className="border-t border-violet-200 my-3" aria-hidden />
+
+          {/* Yuki's (from optimized, not affected by slider) — only show the "moved to" side per scenario */}
+          {showNewOd && (scenario === null || scenario !== 'A') && (
+            <label className="block">
+              <span className="text-xs text-neutral-600">Yuki&apos;s on-demand TiB</span>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={optimized.onDemandTiB || ''}
+                onChange={(e) =>
+                  onOptimizedChange({ ...optimized, onDemandTiB: parseInput(e.target.value) || 0 })
+                }
+                className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
+              />
+            </label>
+          )}
+          {showNewSlots && (scenario === null || scenario === 'A') && (
+            <label className="block">
+              <span className="text-xs text-neutral-600">Yuki&apos;s Slot-Hours</span>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={edition === 'enterprise' ? optimized.enterpriseSlotHours || '' : optimized.standardSlotHours || ''}
+                onChange={(e) => {
+                  const v = parseInput(e.target.value) || 0;
+                  edition === 'enterprise'
+                    ? onOptimizedChange({ ...optimized, enterpriseSlotHours: v })
+                    : onOptimizedChange({ ...optimized, standardSlotHours: v });
+                }}
+                className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
+              />
+            </label>
+          )}
+          {showNewSlots && (scenario === null || scenario === 'C') && (
+            <>
+              <label className="block">
+                <span className="text-xs text-neutral-600">Yuki&apos;s {slotsLabel}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={edition === 'enterprise' ? optimized.enterpriseSlotHours || '' : optimized.standardSlotHours || ''}
+                  onChange={(e) => {
+                    const v = parseInput(e.target.value) || 0;
+                    edition === 'enterprise'
+                      ? onOptimizedChange({ ...optimized, enterpriseSlotHours: v })
+                      : onOptimizedChange({ ...optimized, standardSlotHours: v });
+                  }}
+                  className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-neutral-600">
+                  Yuki&apos;s {edition === 'enterprise' ? 'Standard' : 'Enterprise'} Slot-Hours
+                </span>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={edition === 'enterprise' ? optimized.standardSlotHours || '' : optimized.enterpriseSlotHours || ''}
+                onChange={(e) => {
+                  const v = parseInput(e.target.value) || 0;
+                  edition === 'enterprise'
+                    ? onOptimizedChange({ ...optimized, standardSlotHours: v })
+                    : onOptimizedChange({ ...optimized, enterpriseSlotHours: v });
+                }}
+                className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
+              />
+            </label>
+            </>
           )}
         </div>
       </div>

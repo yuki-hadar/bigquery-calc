@@ -30,11 +30,19 @@ function fmtUSD(n: number): string {
   }).format(n);
 }
 
+function formatLabel(v: unknown): string {
+  return fmtUSD(Number(v ?? 0));
+}
+
+function yAxisFormatter(v: number): string {
+  return `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`;
+}
+
 export function ComparisonChart({ data }: { data: ChartRow[] }) {
   return (
     <div className="rounded-xl border border-neutral-200 bg-white shadow-sm p-4 pb-8 mb-6">
       <h3 className="text-sm font-semibold text-neutral-600 mb-4">
-        Original (customer) vs With Yuki — BigQuery Cost + Yuki (purple)
+        Total cost — inc. Yuki&apos;s fee
       </h3>
       <ResponsiveContainer width="100%" height={280}>
         <BarChart
@@ -50,14 +58,17 @@ export function ComparisonChart({ data }: { data: ChartRow[] }) {
             className="text-neutral-600"
           />
           <YAxis
-            tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
+            tickFormatter={yAxisFormatter}
             tick={{ fill: 'currentColor', fontSize: 11 }}
             className="text-neutral-600"
           />
           <Legend />
-          <Bar dataKey="BigQuery Cost" stackId="a" fill={COLORS['BigQuery Cost']} name="BigQuery Cost" />
+          <Bar dataKey="BigQuery Cost" stackId="a" fill={COLORS['BigQuery Cost']} name="BigQuery Cost">
+            <LabelList dataKey="BigQuery Cost" position="center" formatter={formatLabel} style={{ fill: 'white', fontSize: 10 }} />
+          </Bar>
           <Bar dataKey="Yuki Fee" stackId="a" fill={COLORS['Yuki Fee']} name="Yuki (fee)">
-            <LabelList dataKey="total" position="top" formatter={(v: unknown) => fmtUSD(Number(v ?? 0))} />
+            <LabelList dataKey="Yuki Fee" position="center" formatter={formatLabel} style={{ fill: 'white', fontSize: 10 }} />
+            <LabelList dataKey="total" position="top" formatter={formatLabel} />
           </Bar>
         </BarChart>
       </ResponsiveContainer>

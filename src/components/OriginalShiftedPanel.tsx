@@ -26,7 +26,7 @@ export function OriginalShiftedPanel({ original, displayed }: OriginalShiftedPan
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
           <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider">
-            Original OD TiB
+            Original on-demand TiB
           </p>
           <p className="mt-1 text-lg font-semibold text-neutral-900 font-mono">
             {fmtNum(original.onDemandTiB)}
@@ -42,7 +42,7 @@ export function OriginalShiftedPanel({ original, displayed }: OriginalShiftedPan
         </div>
         <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3">
           <p className="text-xs font-medium text-violet-600 uppercase tracking-wider">
-            Shifted OD TiB
+            Shifted on-demand TiB
           </p>
           <p className="mt-1 text-lg font-semibold text-violet-900 font-mono">
             {fmtNum(shiftedOd)}

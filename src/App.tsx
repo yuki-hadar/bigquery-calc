@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import type { UsageState } from './lib/pricing';
 import {
   computeMetrics,
@@ -11,14 +11,7 @@ import { ComparisonChart } from './components/ComparisonChart';
 import { EfficiencyGauge } from './components/EfficiencyGauge';
 import { OriginalShiftedPanel } from './components/OriginalShiftedPanel';
 import { Sidebar, type Edition, type Scenario } from './components/Sidebar';
-
-function lerpUsage(from: UsageState, to: UsageState, t: number): UsageState {
-  return {
-    onDemandTiB: from.onDemandTiB + (to.onDemandTiB - from.onDemandTiB) * t,
-    enterpriseSlotHours: from.enterpriseSlotHours + (to.enterpriseSlotHours - from.enterpriseSlotHours) * t,
-    standardSlotHours: from.standardSlotHours + (to.standardSlotHours - from.standardSlotHours) * t,
-  };
-}
+import { lerpUsage } from './lib/calc';
 
 const defaultOriginal: UsageState = {
   onDemandTiB: 0,
@@ -36,23 +29,60 @@ export default function App() {
   const [original, setOriginal] = useState<UsageState>(defaultOriginal);
   const [optimized, setOptimized] = useState<UsageState>(defaultOptimized);
   const [config, setConfig] = useState<PricingConfig>(defaultPricingConfig);
-  const [queriesMovedPct, setQueriesMovedPct] = useState(60);
+  const [queriesMovedPct, setQueriesMovedPctState] = useState(60);
+  const lastPctRef = useRef(60);
+  const setQueriesMovedPct = useCallback((next: number) => {
+    try {
+      if (Math.abs(next - lastPctRef.current) < 0.0001) return;
+      lastPctRef.current = next;
+      setQueriesMovedPctState(next);
+    } catch (_) {
+      // guard against update loops
+    }
+  }, []);
+
   const [edition, setEdition] = useState<Edition>('standard');
-  const [scenario, setScenario] = useState<Scenario>('A');
+  const [scenario, setScenario] = useState<Scenario | null>(null);
 
   const displayedOptimized = useMemo(
     () => lerpUsage(original, optimized, queriesMovedPct / 100),
     [original, optimized, queriesMovedPct]
   );
 
+  // For cost and metrics use: Remained (from lerp) + Yuki (from optimized) per scenario.
+  // A (OD→Slots): remained OD + Yuki slots. B (Slots→OD): remained slots + Yuki OD. C/null: lerp.
+  const effectiveDisplayed = useMemo((): UsageState => {
+    if (scenario === 'A') {
+      return {
+        onDemandTiB: displayedOptimized.onDemandTiB,
+        standardSlotHours: optimized.standardSlotHours,
+        enterpriseSlotHours: optimized.enterpriseSlotHours,
+      };
+    }
+    if (scenario === 'B') {
+      return {
+        onDemandTiB: optimized.onDemandTiB,
+        standardSlotHours: displayedOptimized.standardSlotHours,
+        enterpriseSlotHours: displayedOptimized.enterpriseSlotHours,
+      };
+    }
+    return displayedOptimized;
+  }, [
+    scenario,
+    displayedOptimized,
+    optimized.onDemandTiB,
+    optimized.standardSlotHours,
+    optimized.enterpriseSlotHours,
+  ]);
+
   const metrics = useMemo(
-    () => computeMetrics(original, displayedOptimized, config),
-    [original, displayedOptimized, config]
+    () => computeMetrics(original, effectiveDisplayed, config),
+    [original, effectiveDisplayed, config]
   );
 
   const chartData = useMemo(() => {
     const beforeBq = totalGoogleCost(original, config);
-    const afterBq = totalGoogleCost(displayedOptimized, config);
+    const afterBq = totalGoogleCost(effectiveDisplayed, config);
     return [
       {
         name: 'Original (customer)',
@@ -67,7 +97,7 @@ export default function App() {
         total: afterBq + metrics.yukiFeeUSD,
       },
     ];
-  }, [original, displayedOptimized, config, metrics.yukiFeeUSD]);
+  }, [original, effectiveDisplayed, config, metrics.yukiFeeUSD]);
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-neutral-100">
@@ -92,7 +122,7 @@ export default function App() {
             Yuki BigQuery Pricing & Savings
           </h1>
           <p className="text-neutral-600 mt-1 text-sm">
-            Visualize the shift from BigQuery On-Demand to Reservations (and vice-versa) using Yuki Credit (YC). 1 YC = ${config.ycUsd.toFixed(2)} USD.
+            Visualize the shift from BigQuery on-demand to Reservations (and vice-versa).
           </p>
         </header>
 
@@ -106,7 +136,7 @@ export default function App() {
           </div>
         </div>
         <div className="mt-6">
-          <OriginalShiftedPanel original={original} displayed={displayedOptimized} />
+          <OriginalShiftedPanel original={original} displayed={effectiveDisplayed} />
         </div>
       </main>
     </div>

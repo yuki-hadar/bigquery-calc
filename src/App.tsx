@@ -4,6 +4,7 @@ import {
   computeMetrics,
   totalGoogleCost,
   defaultPricingConfig,
+  getTibPerSlotRatio,
 } from './lib/pricing';
 import type { PricingConfig } from './lib/pricing';
 import { KPICards } from './components/KPICards';
@@ -11,7 +12,7 @@ import { ComparisonChart } from './components/ComparisonChart';
 import { EfficiencyGauge } from './components/EfficiencyGauge';
 import { OriginalShiftedPanel } from './components/OriginalShiftedPanel';
 import { Sidebar, type Edition, type Scenario } from './components/Sidebar';
-import { lerpUsage } from './lib/calc';
+import { lerpUsage, effectiveDisplayedForScenarioA, effectiveDisplayedForScenarioB } from './lib/calc';
 
 const defaultOriginal: UsageState = {
   onDemandTiB: 0,
@@ -49,40 +50,37 @@ export default function App() {
     [original, optimized, queriesMovedPct]
   );
 
-  // For cost and metrics use: Remained (from lerp) + Yuki (from optimized) per scenario.
-  // A (OD→Slots): remained OD + Yuki slots. B (Slots→OD): remained slots + Yuki OD. C/null: lerp.
+  // For cost and metrics use: Remained + Yuki per scenario.
+  // A (OD→Slots): slider = remained % → remained OD = original.onDemandTiB * (pct/100). B: remained slots = original * (pct/100). C/null: lerp.
   const effectiveDisplayed = useMemo((): UsageState => {
     if (scenario === 'A') {
-      return {
-        onDemandTiB: displayedOptimized.onDemandTiB,
-        standardSlotHours: optimized.standardSlotHours,
-        enterpriseSlotHours: optimized.enterpriseSlotHours,
-      };
+      return effectiveDisplayedForScenarioA(original, optimized, queriesMovedPct);
     }
     if (scenario === 'B') {
-      return {
-        onDemandTiB: optimized.onDemandTiB,
-        standardSlotHours: displayedOptimized.standardSlotHours,
-        enterpriseSlotHours: displayedOptimized.enterpriseSlotHours,
-      };
+      const tibPerSlotRatio = getTibPerSlotRatio(config, edition === 'enterprise');
+      return effectiveDisplayedForScenarioB(original, optimized, queriesMovedPct, tibPerSlotRatio);
     }
     return displayedOptimized;
   }, [
     scenario,
+    original,
+    optimized,
+    queriesMovedPct,
+    config,
+    edition,
     displayedOptimized,
-    optimized.onDemandTiB,
-    optimized.standardSlotHours,
-    optimized.enterpriseSlotHours,
   ]);
 
   const metrics = useMemo(
-    () => computeMetrics(original, effectiveDisplayed, config),
-    [original, effectiveDisplayed, config]
+    () =>
+      computeMetrics(original, effectiveDisplayed, config, scenario === 'B' ? { equivOdTiB: optimized.onDemandTiB } : undefined),
+    [original, effectiveDisplayed, config, scenario, optimized.onDemandTiB]
   );
 
   const chartData = useMemo(() => {
     const beforeBq = totalGoogleCost(original, config);
     const afterBq = totalGoogleCost(effectiveDisplayed, config);
+    const withYukiBq = scenario === 'B' ? metrics.newTotalCost : afterBq;
     return [
       {
         name: 'Original (customer)',
@@ -92,19 +90,19 @@ export default function App() {
       },
       {
         name: 'With Yuki',
-        'BigQuery Cost': afterBq,
+        'BigQuery Cost': withYukiBq,
         'Yuki Fee': metrics.yukiFeeUSD,
-        total: afterBq + metrics.yukiFeeUSD,
+        total: withYukiBq + metrics.yukiFeeUSD,
       },
     ];
-  }, [original, effectiveDisplayed, config, metrics.yukiFeeUSD]);
+  }, [original, effectiveDisplayed, config, scenario, metrics.newTotalCost, metrics.yukiFeeUSD]);
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-neutral-100">
       <Sidebar
         original={original}
         optimized={optimized}
-        displayedOptimized={displayedOptimized}
+        displayedForRemained={effectiveDisplayed}
         config={config}
         queriesMovedPct={queriesMovedPct}
         edition={edition}
@@ -136,7 +134,14 @@ export default function App() {
           </div>
         </div>
         <div className="mt-6">
-          <OriginalShiftedPanel original={original} displayed={effectiveDisplayed} />
+          <OriginalShiftedPanel
+            original={original}
+            displayed={effectiveDisplayed}
+            scenario={scenario}
+            chargeableYC={scenario === 'B' ? metrics.chargeableYC : undefined}
+            config={config}
+            edition={edition}
+          />
         </div>
       </main>
     </div>

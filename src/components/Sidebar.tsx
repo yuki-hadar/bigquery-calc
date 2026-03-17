@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { UsageState } from '../lib/pricing';
 import type { PricingConfig } from '../lib/pricing';
-import { impliedPct, clampToRange } from '../lib/calc';
+import { impliedPct, clampToRange, remainedOdToPct, remainedSlotsToPct } from '../lib/calc';
 
 const SLIDER_DEBOUNCE_MS = 500;
-const REMAINED_DEBOUNCE_MS = 1000;
+
 
 export type Edition = 'standard' | 'enterprise';
 export type Scenario = 'A' | 'B' | 'C';
@@ -12,7 +12,8 @@ export type Scenario = 'A' | 'B' | 'C';
 interface SidebarProps {
   original: UsageState;
   optimized: UsageState;
-  displayedOptimized: UsageState;
+  /** Shown in Remained fields; for scenario B this is effectiveDisplayed (remained slots = original * pct/100). */
+  displayedForRemained: UsageState;
   config: PricingConfig;
   queriesMovedPct: number;
   edition: Edition;
@@ -34,7 +35,7 @@ function parseInput(s: string): number {
 export function Sidebar({
   original,
   optimized,
-  displayedOptimized,
+  displayedForRemained,
   config,
   queriesMovedPct,
   edition,
@@ -52,51 +53,53 @@ export function Sidebar({
     onConfigChange({ ...config, [key]: value });
 
   const [sliderValue, setSliderValue] = useState(queriesMovedPct);
-  const sliderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sliderDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     setSliderValue(queriesMovedPct);
   }, [queriesMovedPct]);
   useEffect(() => () => {
-    if (sliderTimeoutRef.current) clearTimeout(sliderTimeoutRef.current);
-    if (remainedTimeoutRef.current) clearTimeout(remainedTimeoutRef.current);
+    if (sliderDebounceRef.current) clearTimeout(sliderDebounceRef.current);
   }, []);
 
   const handleSliderChange = (next: number) => {
     setSliderValue(next);
-    if (sliderTimeoutRef.current) clearTimeout(sliderTimeoutRef.current);
-    sliderTimeoutRef.current = setTimeout(() => {
-      try {
-        onQueriesMovedPctChange(next);
-      } catch (_) {
-        // slider is nice-to-have; don't break manual fields
+    if (sliderDebounceRef.current) clearTimeout(sliderDebounceRef.current);
+    sliderDebounceRef.current = setTimeout(() => {
+      if (Math.abs(next - queriesMovedPct) >= 0.01) {
+        try {
+          onQueriesMovedPctChange(next);
+        } catch (_) {}
       }
-      sliderTimeoutRef.current = null;
+      sliderDebounceRef.current = null;
     }, SLIDER_DEBOUNCE_MS);
   };
 
   type RemainedField = 'od' | 'slots' | 'otherSlots';
-  const [remainedPending, setRemainedPending] = useState<{ field: RemainedField; value: number } | null>(null);
-  const remainedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [remainedPending, setRemainedPending] = useState<{ field: RemainedField; displayValue: string } | null>(null);
 
-  const scheduleRemainedCommit = (
+  const commitRemained = (
     field: 'onDemandTiB' | 'standardSlotHours' | 'enterpriseSlotHours',
-    rawValue: number,
-    uiField: RemainedField
+    rawValue: number
   ) => {
-    setRemainedPending({ field: uiField, value: rawValue });
-    if (remainedTimeoutRef.current) clearTimeout(remainedTimeoutRef.current);
-    remainedTimeoutRef.current = setTimeout(() => {
-      const orig = original[field];
-      const opt = optimized[field];
-      const { pct } = clampToRange(rawValue, orig, opt);
-      if (pct >= 0) {
-        onQueriesMovedPctChange(pct);
-      } else {
-        onQueriesMovedPctChange(impliedPct(original, optimized, field, rawValue));
-      }
-      setRemainedPending(null);
-      remainedTimeoutRef.current = null;
-    }, REMAINED_DEBOUNCE_MS);
+    // Scenario A (OD→Slots): slider is "remained %" for on-demand TiB
+    if (scenario === 'A' && field === 'onDemandTiB') {
+      onQueriesMovedPctChange(remainedOdToPct(original.onDemandTiB, rawValue));
+      return;
+    }
+    // Scenario B (Slots→OD): slider is "remained %" for slots
+    if (scenario === 'B' && (field === 'standardSlotHours' || field === 'enterpriseSlotHours')) {
+      const originalSlots = original.standardSlotHours + original.enterpriseSlotHours;
+      onQueriesMovedPctChange(remainedSlotsToPct(originalSlots, rawValue));
+      return;
+    }
+    const orig = original[field];
+    const opt = optimized[field];
+    const { pct } = clampToRange(rawValue, orig, opt);
+    if (pct >= 0) {
+      onQueriesMovedPctChange(pct);
+    } else {
+      onQueriesMovedPctChange(impliedPct(original, optimized, field, rawValue));
+    }
   };
 
   const scenarioConfigs: Record<Scenario, { original: UsageState; optimized: UsageState }> = {
@@ -305,7 +308,7 @@ export function Sidebar({
 
       <div>
         <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-2">
-          Queries moved (%)
+          {(scenario === 'A' || scenario === 'B') ? 'Remained (%)' : 'Queries moved (%)'}
         </h2>
         <div className="flex items-center gap-3">
           <input
@@ -334,18 +337,20 @@ export function Sidebar({
               <span className="text-xs text-neutral-600">Remained on-demand TiB</span>
               <input
                 data-testid="remained-on-demand-tib"
-                type="number"
-                min={0}
-                step={0.01}
+                type="text"
+                inputMode="decimal"
                 value={
                   remainedPending?.field === 'od'
-                    ? remainedPending.value
-                    : displayedOptimized.onDemandTiB || ''
+                    ? remainedPending.displayValue
+                    : String(displayedForRemained.onDemandTiB || '')
                 }
                 onChange={(e) => {
-                  const v = parseInput(e.target.value) || 0;
-                  scheduleRemainedCommit('onDemandTiB', v, 'od');
+                  const raw = e.target.value;
+                  setRemainedPending({ field: 'od', displayValue: raw });
+                  const v = parseInput(raw) || 0;
+                  commitRemained('onDemandTiB', v);
                 }}
+                onBlur={() => setRemainedPending(null)}
                 className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
               />
             </label>
@@ -356,21 +361,26 @@ export function Sidebar({
                 {scenario === 'B' ? 'Remained Slot-Hours' : slotsLabel}
               </span>
               <input
-                type="number"
-                min={0}
-                step={0.01}
+                data-testid="remained-slot-hours"
+                type="text"
+                inputMode="decimal"
                 value={
                   remainedPending?.field === 'slots'
-                    ? remainedPending.value
-                    : edition === 'enterprise'
-                      ? displayedOptimized.enterpriseSlotHours || ''
-                      : displayedOptimized.standardSlotHours || ''
+                    ? remainedPending.displayValue
+                    : String(
+                        edition === 'enterprise'
+                          ? displayedForRemained.enterpriseSlotHours || ''
+                          : displayedForRemained.standardSlotHours || ''
+                      )
                 }
                 onChange={(e) => {
-                  const v = parseInput(e.target.value) || 0;
+                  const raw = e.target.value;
+                  setRemainedPending({ field: 'slots', displayValue: raw });
+                  const v = parseInput(raw) || 0;
                   const field = edition === 'enterprise' ? 'enterpriseSlotHours' : 'standardSlotHours';
-                  scheduleRemainedCommit(field, v, 'slots');
+                  commitRemained(field, v);
                 }}
+                onBlur={() => setRemainedPending(null)}
                 className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
               />
             </label>
@@ -381,21 +391,25 @@ export function Sidebar({
                 {edition === 'enterprise' ? 'Standard Slot-Hours' : 'Enterprise Slot-Hours'}
               </span>
               <input
-                type="number"
-                min={0}
-                step={0.01}
+                type="text"
+                inputMode="decimal"
                 value={
                   remainedPending?.field === 'otherSlots'
-                    ? remainedPending.value
-                    : edition === 'enterprise'
-                      ? displayedOptimized.standardSlotHours || ''
-                      : displayedOptimized.enterpriseSlotHours || ''
+                    ? remainedPending.displayValue
+                    : String(
+                        edition === 'enterprise'
+                          ? displayedForRemained.standardSlotHours || ''
+                          : displayedForRemained.enterpriseSlotHours || ''
+                      )
                 }
                 onChange={(e) => {
-                  const v = parseInput(e.target.value) || 0;
+                  const raw = e.target.value;
+                  setRemainedPending({ field: 'otherSlots', displayValue: raw });
+                  const v = parseInput(raw) || 0;
                   const field = edition === 'enterprise' ? 'standardSlotHours' : 'enterpriseSlotHours';
-                  scheduleRemainedCommit(field, v, 'otherSlots');
+                  commitRemained(field, v);
                 }}
+                onBlur={() => setRemainedPending(null)}
                 className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-900 font-mono text-sm"
               />
             </label>

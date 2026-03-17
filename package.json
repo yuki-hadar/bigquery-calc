@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test --config=playwright.config.cjs"
+    "test:e2e": "playwright test --config=playwright.config.cjs",
+    "test:e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "react": "^19.2.4",

@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import {
   chargeableUnitsAndFee,
   computeMetrics,
@@ -66,6 +67,27 @@ function scenarioA() {
   );
 }
 
+// OD→Slots (scenario A) exact KPIs: 16k OD → 50% remained 8k, 250k slots. New Total = 8k×6.25 + 250k×0.04 = $60k.
+function scenarioAExactKpis() {
+  const original: UsageState = {
+    onDemandTiB: 16000,
+    enterpriseSlotHours: 0,
+    standardSlotHours: 0,
+  };
+  const displayed: UsageState = {
+    onDemandTiB: 8000,
+    enterpriseSlotHours: 0,
+    standardSlotHours: 250000,
+  };
+  const metrics = computeMetrics(original, displayed, config);
+  expect(metrics.totalOriginalCost).toBe(100_000); // 16k × 6.25
+  expect(metrics.newTotalCost).toBe(60_000); // 8k×6.25 + 250k×0.04
+  expect(metrics.grossSavings).toBe(40_000);
+  expect(metrics.chargeableYC).toBe(6400);
+  expect(Math.round(metrics.yukiFeeUSD)).toBe(12_800);
+  expect(Math.round(metrics.customerNetSavings)).toBe(27_200);
+}
+
 function scenarioB() {
   const current: UsageState = {
     onDemandTiB: 0,
@@ -110,9 +132,91 @@ function scenarioC() {
   );
 }
 
-scenarioA();
-scenarioB();
-scenarioC();
-userCaseTotalCost();
-userCaseChargeableYC();
-console.log('All pricing scenarios passed.');
+function scenarioBSlotsToOdWithYukiOd() {
+  const original: UsageState = {
+    onDemandTiB: 0,
+    enterpriseSlotHours: 0,
+    standardSlotHours: 2500000,
+  };
+  const withYuki: UsageState = {
+    onDemandTiB: 9600,
+    enterpriseSlotHours: 0,
+    standardSlotHours: 1250000,
+  };
+  const metrics = computeMetrics(original, withYuki, config, { equivOdTiB: 1600 });
+  console.assert(
+    metrics.chargeableYC > 0,
+    `Scenario B (2.5M→1.25M slots + 9600 OD incl. Yuki 1600): expected positive savings, got ${metrics.chargeableYC}`
+  );
+  const cost = totalGoogleCost(withYuki, config);
+  console.assert(cost > 0, `Scenario B with Yuki: expected positive cost, got ${cost}`);
+}
+
+function scenarioBSlotsToOdYukiFee12800() {
+  const original: UsageState = {
+    onDemandTiB: 0,
+    enterpriseSlotHours: 0,
+    standardSlotHours: 2500000,
+  };
+  const withYuki: UsageState = {
+    onDemandTiB: 9600,
+    enterpriseSlotHours: 0,
+    standardSlotHours: 1250000,
+  };
+  const metrics = computeMetrics(original, withYuki, config, { equivOdTiB: 1600 });
+  console.assert(
+    Math.round(metrics.yukiFeeUSD) === 12800,
+    `Scenario B (2.5M→1.25M, Yuki OD 1600): expected Yuki Fee $12,800, got ${metrics.yukiFeeUSD}`
+  );
+}
+
+// Slots→OD: New Total Cost = remained slots + Yuki's OD only → 1.25M×0.04 + 1600×6.25 = $60k
+function scenarioBSlotsToOdNewTotalRemainedPlusYukiOd() {
+  const original: UsageState = {
+    onDemandTiB: 0,
+    enterpriseSlotHours: 0,
+    standardSlotHours: 2500000,
+  };
+  const withYuki: UsageState = {
+    onDemandTiB: 9600,
+    enterpriseSlotHours: 0,
+    standardSlotHours: 1250000,
+  };
+  const metrics = computeMetrics(original, withYuki, config, { equivOdTiB: 1600 });
+  expect(metrics.totalOriginalCost).toBe(100_000); // 2.5M × 0.04
+  expect(metrics.newTotalCost).toBe(60_000); // 1.25M×0.04 + 1600×6.25
+  expect(metrics.grossSavings).toBe(40_000);
+  expect(metrics.chargeableYC).toBe(6400);
+  expect(Math.round(metrics.yukiFeeUSD)).toBe(12_800);
+  expect(Math.round(metrics.customerNetSavings)).toBe(27_200);
+}
+
+describe('pricing', () => {
+  it('scenario A', () => {
+    scenarioA();
+  });
+  it('scenario A (OD→Slots) exact KPIs: 16k→8k, 250k slots → $100k, $60k, $40k, 6400 YC, $12.8k, $27.2k', () => {
+    scenarioAExactKpis();
+  });
+  it('scenario B', () => {
+    scenarioB();
+  });
+  it('scenario B Slots→OD with Yuki OD included: 2.5M slots, 1.25M remained + 9600 OD → positive savings', () => {
+    scenarioBSlotsToOdWithYukiOd();
+  });
+  it('scenario B Slots→OD: 2.5M→1.25M, Yuki OD 1600 → Yuki Fee = $12,800', () => {
+    scenarioBSlotsToOdYukiFee12800();
+  });
+  it('scenario B (Slots→OD) exact KPIs: 2.5M→1.25M slots, Yuki 1600 TiB → $100k, $60k, $40k, 6400 YC, $12.8k, $27.2k', () => {
+    scenarioBSlotsToOdNewTotalRemainedPlusYukiOd();
+  });
+  it('scenario C', () => {
+    scenarioC();
+  });
+  it('user case total cost', () => {
+    userCaseTotalCost();
+  });
+  it('user case chargeable YC', () => {
+    userCaseChargeableYC();
+  });
+});

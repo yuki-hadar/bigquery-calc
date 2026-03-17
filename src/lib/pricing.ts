@@ -56,6 +56,12 @@ export function totalGoogleCost(s: UsageState, config: PricingConfig): number {
   );
 }
 
+/** Slot-hours per TiB (on-demand equivalent). Use standard (0.04) or enterprise (0.06) by edition. */
+export function getTibPerSlotRatio(config: PricingConfig, useEnterpriseSlot: boolean): number {
+  const slotPrice = useEnterpriseSlot ? config.enterpriseSlotPrice : config.standardSlotPrice;
+  return config.onDemandTiBPrice / slotPrice;
+}
+
 function grossUnitsSavedTiB(
   current: UsageState,
   optimized: UsageState,
@@ -72,11 +78,15 @@ function grossUnitsSavedTiB(
 function costEquivNewUnitsTiB(
   current: UsageState,
   optimized: UsageState,
-  config: PricingConfig
+  config: PricingConfig,
+  equivOdTiBOverride?: number
 ): number {
   const tbsrStd = tbsrStandard(config);
   const tbsrEnt = tbsrEnterprise(config);
-  const odAdded = Math.max(0, optimized.onDemandTiB - current.onDemandTiB);
+  const odAdded =
+    equivOdTiBOverride !== undefined
+      ? Math.max(0, equivOdTiBOverride - current.onDemandTiB)
+      : Math.max(0, optimized.onDemandTiB - current.onDemandTiB);
   const stdAdded = Math.max(0, optimized.standardSlotHours - current.standardSlotHours);
   const entAdded = Math.max(0, optimized.enterpriseSlotHours - current.enterpriseSlotHours);
   return odAdded + stdAdded / tbsrStd + entAdded / tbsrEnt;
@@ -85,10 +95,16 @@ function costEquivNewUnitsTiB(
 export function chargeableUnitsAndFee(
   current: UsageState,
   optimized: UsageState,
-  config: PricingConfig
+  config: PricingConfig,
+  options?: { equivOdTiB?: number }
 ): { chargeableYC: number; yukiFeeUSD: number } {
   const gross = grossUnitsSavedTiB(current, optimized, config);
-  const equiv = costEquivNewUnitsTiB(current, optimized, config);
+  const equiv = costEquivNewUnitsTiB(
+    current,
+    optimized,
+    config,
+    options?.equivOdTiB
+  );
   const chargeableYC = Math.round(Math.max(0, gross - equiv) * 100) / 100;
   const yukiFeeUSD = chargeableYC * config.ycUsd;
   return { chargeableYC, yukiFeeUSD };
@@ -104,15 +120,33 @@ export interface DashboardMetrics {
   yukiCapturePercent: number;
 }
 
+export interface ComputeMetricsOptions {
+  /** For Slots→OD: use only Yuki's OD in chargeable equiv (not OD from moved slots). */
+  equivOdTiB?: number;
+}
+
 export function computeMetrics(
   current: UsageState,
   optimized: UsageState,
-  config: PricingConfig = defaultPricingConfig
+  config: PricingConfig = defaultPricingConfig,
+  options?: ComputeMetricsOptions
 ): DashboardMetrics {
   const originalCost = totalGoogleCost(current, config);
-  const newGoogleCost = totalGoogleCost(optimized, config);
+  // Slots→OD: "New Total Cost" = remained slots + Yuki's OD only (1.25M×0.04 + 1600×6.25 = $60k).
+  const newGoogleCost =
+    options?.equivOdTiB != null
+      ? totalGoogleCost(
+          { ...optimized, onDemandTiB: options.equivOdTiB },
+          config
+        )
+      : totalGoogleCost(optimized, config);
   const grossSavings = originalCost - newGoogleCost;
-  const { chargeableYC, yukiFeeUSD } = chargeableUnitsAndFee(current, optimized, config);
+  const { chargeableYC, yukiFeeUSD } = chargeableUnitsAndFee(
+    current,
+    optimized,
+    config,
+    options
+  );
   const customerNetSavings = grossSavings - yukiFeeUSD;
   const yukiCapturePercent =
     grossSavings > 0 ? (yukiFeeUSD / grossSavings) * 100 : 0;

@@ -20,7 +20,7 @@ module.exports = defineConfig({
   webServer: {
     command: 'npm run build && npx vite preview --port 4174',
     url: 'http://localhost:4174/bigquery-calc/',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: true,
     timeout: 120000,
   },
 });

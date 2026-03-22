@@ -58,7 +58,7 @@ test.describe('OD→Reservation (scenario A)', () => {
     await expect(kpiCards.filter({ hasText: '$100,000' }).first()).toBeVisible({ timeout: 10000 });
     await expect(kpiCards.filter({ hasText: 'Before Yuki' }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'New Total Cost' }).filter({ hasText: '$60,000' }).first()).toBeVisible();
-    await expect(page.locator('div.rounded-xl').filter({ hasText: 'BigQuery cost after optimization' }).first()).toBeVisible();
+    await expect(page.getByText('On-demand TiB:', { exact: false }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'Gross Savings' }).filter({ hasText: '$40,000' }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'Reduction in BigQuery spend' }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'Yuki Fee' }).filter({ hasText: '$12,800' }).first()).toBeVisible();
@@ -151,7 +151,7 @@ test.describe('Slots→OD (scenario B) - remained slot-hours = original × pct',
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'Total Original Cost' }).filter({ hasText: '$100,000' }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'Before Yuki' }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'New Total Cost' }).filter({ hasText: '$60,000' }).first()).toBeVisible();
-    await expect(page.locator('div.rounded-xl').filter({ hasText: 'BigQuery cost after optimization' }).first()).toBeVisible();
+    await expect(page.getByText('On-demand TiB:', { exact: false }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'Gross Savings' }).filter({ hasText: '$40,000' }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'Reduction in BigQuery spend' }).first()).toBeVisible();
     await expect(page.locator('div.rounded-xl').filter({ hasText: 'Yuki Fee' }).filter({ hasText: '$12,800' }).first()).toBeVisible();

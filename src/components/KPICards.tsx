@@ -1,4 +1,5 @@
-import type { DashboardMetrics } from '../lib/pricing';
+import type { DashboardMetrics, PricingConfig, UsageState } from '../lib/pricing';
+import { costOnDemand, costStandardSlots, costEnterpriseSlots } from '../lib/pricing';
 
 function fmtUSD(n: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -16,6 +17,18 @@ function fmtYC(n: number): string {
   }).format(n);
 }
 
+function fmtQty(n: number): string {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 4,
+  }).format(n);
+}
+
+function fmtSlotHours(n: number): string {
+  return new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0,
+  }).format(Math.round(n));
+}
+
 type Card = {
   label: string;
   value: string;
@@ -23,7 +36,21 @@ type Card = {
   sub: string;
 };
 
-export function KPICards({ metrics, ycUsd }: { metrics: DashboardMetrics; ycUsd: number }) {
+export function KPICards({
+  metrics,
+  ycUsd,
+  config,
+  original,
+}: {
+  metrics: DashboardMetrics;
+  ycUsd: number;
+  config: PricingConfig;
+  original: UsageState;
+}) {
+  const b = metrics.newTotalBreakdown;
+  const origOdCost = costOnDemand(original.onDemandTiB, config);
+  const origStdCost = costStandardSlots(original.standardSlotHours, config);
+  const origEntCost = costEnterpriseSlots(original.enterpriseSlotHours, config);
   const cards: Card[] = [
     {
       label: 'Total Original Cost',
@@ -33,7 +60,7 @@ export function KPICards({ metrics, ycUsd }: { metrics: DashboardMetrics; ycUsd:
     {
       label: 'New Total Cost',
       value: fmtUSD(metrics.newTotalCost),
-      sub: 'BigQuery cost after optimization',
+      sub: '',
     },
     {
       label: 'Gross Savings',
@@ -47,7 +74,7 @@ export function KPICards({ metrics, ycUsd }: { metrics: DashboardMetrics; ycUsd:
       sub: `Chargeable units × $${ycUsd.toFixed(2)}`,
     },
     {
-      label: 'Customer Net Savings',
+      label: 'Customer Net Savings (ROI)',
       value: fmtUSD(metrics.customerNetSavings),
       sub: 'Gross savings − Yuki fee',
     },
@@ -69,7 +96,54 @@ export function KPICards({ metrics, ycUsd }: { metrics: DashboardMetrics; ycUsd:
           {c.valueLine2 && (
             <p className="mt-0.5 text-sm text-neutral-600 font-mono">{c.valueLine2}</p>
           )}
-          <p className="mt-0.5 text-xs text-neutral-500">{c.sub}</p>
+          {c.label === 'Total Original Cost' ? (
+            <>
+              <div className="mt-1.5 space-y-1 text-xs text-neutral-600 leading-snug">
+                <p>
+                  On-demand TiB: {fmtQty(original.onDemandTiB)} × ${config.onDemandTiBPrice}/TiB ={' '}
+                  <span className="font-mono text-neutral-800">{fmtUSD(origOdCost)}</span>
+                </p>
+                {original.standardSlotHours > 0 && (
+                  <p>
+                    Standard reservation slot hours: {fmtSlotHours(original.standardSlotHours)} × $
+                    {config.standardSlotPrice}/hr ={' '}
+                    <span className="font-mono text-neutral-800">{fmtUSD(origStdCost)}</span>
+                  </p>
+                )}
+                {original.enterpriseSlotHours > 0 && (
+                  <p>
+                    Enterprise reservation slot hours: {fmtSlotHours(original.enterpriseSlotHours)} × $
+                    {config.enterpriseSlotPrice}/hr ={' '}
+                    <span className="font-mono text-neutral-800">{fmtUSD(origEntCost)}</span>
+                  </p>
+                )}
+              </div>
+              <p className="mt-1.5 text-xs text-neutral-500">{c.sub}</p>
+            </>
+          ) : c.label === 'New Total Cost' ? (
+            <div className="mt-1.5 space-y-1 text-xs text-neutral-600 leading-snug">
+              <p>
+                On-demand TiB: {fmtQty(b.onDemandTiB)} × ${config.onDemandTiBPrice}/TiB ={' '}
+                <span className="font-mono text-neutral-800">{fmtUSD(b.costOnDemandUSD)}</span>
+              </p>
+              {b.standardSlotHours > 0 && (
+                <p>
+                  Standard reservation slot hours: {fmtSlotHours(b.standardSlotHours)} × $
+                  {config.standardSlotPrice}/hr ={' '}
+                  <span className="font-mono text-neutral-800">{fmtUSD(b.costStandardSlotsUSD)}</span>
+                </p>
+              )}
+              {b.enterpriseSlotHours > 0 && (
+                <p>
+                  Enterprise reservation slot hours: {fmtSlotHours(b.enterpriseSlotHours)} × $
+                  {config.enterpriseSlotPrice}/hr ={' '}
+                  <span className="font-mono text-neutral-800">{fmtUSD(b.costEnterpriseSlotsUSD)}</span>
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-0.5 text-xs text-neutral-500">{c.sub}</p>
+          )}
         </div>
       ))}
     </div>

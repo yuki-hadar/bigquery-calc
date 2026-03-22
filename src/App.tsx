@@ -124,13 +124,17 @@ export default function App() {
           </p>
         </header>
 
-        <KPICards metrics={metrics} ycUsd={config.ycUsd} />
+        <KPICards metrics={metrics} ycUsd={config.ycUsd} config={config} original={original} />
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
           <div className="xl:col-span-2">
             <ComparisonChart data={chartData} />
           </div>
           <div>
-            <EfficiencyGauge percent={metrics.yukiCapturePercent} />
+            <EfficiencyGauge
+              percent={metrics.yukiCapturePercent}
+              yukiFeeUSD={metrics.yukiFeeUSD}
+              grossSavings={metrics.grossSavings}
+            />
           </div>
         </div>
         <div className="mt-6">

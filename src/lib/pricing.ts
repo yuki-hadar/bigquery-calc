@@ -110,9 +110,20 @@ export function chargeableUnitsAndFee(
   return { chargeableYC, yukiFeeUSD };
 }
 
+/** Consumption and $ for the “New Total Cost” state (same basis as `newTotalCost`). */
+export interface NewTotalCostBreakdown {
+  onDemandTiB: number;
+  standardSlotHours: number;
+  enterpriseSlotHours: number;
+  costOnDemandUSD: number;
+  costStandardSlotsUSD: number;
+  costEnterpriseSlotsUSD: number;
+}
+
 export interface DashboardMetrics {
   totalOriginalCost: number;
   newTotalCost: number;
+  newTotalBreakdown: NewTotalCostBreakdown;
   grossSavings: number;
   chargeableYC: number;
   yukiFeeUSD: number;
@@ -133,13 +144,19 @@ export function computeMetrics(
 ): DashboardMetrics {
   const originalCost = totalGoogleCost(current, config);
   // Slots→OD: "New Total Cost" = remained slots + Yuki's OD only (1.25M×0.04 + 1600×6.25 = $60k).
-  const newGoogleCost =
+  const newCostState: UsageState =
     options?.equivOdTiB != null
-      ? totalGoogleCost(
-          { ...optimized, onDemandTiB: options.equivOdTiB },
-          config
-        )
-      : totalGoogleCost(optimized, config);
+      ? { ...optimized, onDemandTiB: options.equivOdTiB }
+      : optimized;
+  const newGoogleCost = totalGoogleCost(newCostState, config);
+  const newTotalBreakdown: NewTotalCostBreakdown = {
+    onDemandTiB: newCostState.onDemandTiB,
+    standardSlotHours: newCostState.standardSlotHours,
+    enterpriseSlotHours: newCostState.enterpriseSlotHours,
+    costOnDemandUSD: costOnDemand(newCostState.onDemandTiB, config),
+    costStandardSlotsUSD: costStandardSlots(newCostState.standardSlotHours, config),
+    costEnterpriseSlotsUSD: costEnterpriseSlots(newCostState.enterpriseSlotHours, config),
+  };
   const grossSavings = originalCost - newGoogleCost;
   const { chargeableYC, yukiFeeUSD } = chargeableUnitsAndFee(
     current,
@@ -154,6 +171,7 @@ export function computeMetrics(
   return {
     totalOriginalCost: originalCost,
     newTotalCost: newGoogleCost,
+    newTotalBreakdown,
     grossSavings,
     chargeableYC,
     yukiFeeUSD,

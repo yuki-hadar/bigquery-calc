@@ -1,4 +1,3 @@
-const TARGET_PERCENT = 32;
 const GAUGE_SIZE = 140;
 const STROKE = 10;
 const R = (GAUGE_SIZE - STROKE) / 2;
@@ -6,7 +5,24 @@ const CX = GAUGE_SIZE / 2;
 const CY = GAUGE_SIZE / 2;
 const circumference = 2 * Math.PI * R;
 
-export function EfficiencyGauge({ percent }: { percent: number }) {
+function fmtUSD(n: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
+export function EfficiencyGauge({
+  percent,
+  yukiFeeUSD,
+  grossSavings,
+}: {
+  percent: number;
+  yukiFeeUSD: number;
+  grossSavings: number;
+}) {
   const clamped = Math.min(100, Math.max(0, percent));
   const offset = circumference * (1 - clamped / 100);
 
@@ -15,8 +31,14 @@ export function EfficiencyGauge({ percent }: { percent: number }) {
       <h3 className="text-sm font-semibold text-neutral-600 mb-2 w-full text-center">
         Yuki savings capture
       </h3>
-      <p className="text-xs text-neutral-500 mb-4">
-        Target: ~{TARGET_PERCENT}%
+      <p className="text-xs text-neutral-500 mb-4 text-center px-1 leading-snug">
+        {grossSavings > 0 ? (
+          <>
+            {fmtUSD(yukiFeeUSD)} ÷ {fmtUSD(grossSavings)} = {percent.toFixed(1)}%
+          </>
+        ) : (
+          <>Gross savings ≤ $0 — no capture ratio</>
+        )}
       </p>
       <svg width={GAUGE_SIZE} height={GAUGE_SIZE} className="overflow-visible">
         <circle
